@@ -11,6 +11,9 @@ import { useAbility } from '@casl/vue'
  * @param {string} subject CASL Subject // https://casl.js.org/v4/en/guide/intro#basics
  */
 export const can = (action, subject) => {
+  if (!(action && subject))
+    return true
+
   const vm = getCurrentInstance()
   if (!vm)
     return false

@@ -42,54 +42,43 @@ watch([
     verticalNavHeaderActionAnimationName.value = val[0] ? 'rotate-180' : 'rotate-back-180'
 }, { immediate: true })
 
-const NavItemsValidated = ref([]);
-
-onMounted(() => {
+const NavItemsValidated = computed(() => {
   let user = localStorage.getItem('user') ? JSON.parse(localStorage.getItem('user')) : null;
-  if(user){
-    //traer la lista de permisos del usuario autenticado
-    let permissions = user.permissions;
-    navItems.forEach((nav) => {
-      if(user.role.name == "Super-Admin"){
-        NavItemsValidated.value.push(nav)
-      }else{
-        //los navs que tengan el permiso all puede ver por cualquier usuario
-        if(nav.permission == "all"){
-          NavItemsValidated.value.push(nav)
-        }
-        if(nav.heading){
-          let headingFilter = nav.permissions.filter((permission) => {
-            if(permissions.includes(permission)){
-              return true;
-            }
-            return false;
-          });
-          if(headingFilter.length > 0){
-            NavItemsValidated.value.push(nav);
-          }
-        }
-        //los navs que tengan children se deben filtrar para ver a cual opcion se tiene permiso permiso
-        if(nav.children){
-          let navTemp = nav;
-          let newChildren = nav.children.filter((subnav) => {
-            if(permissions.includes(subnav.permission)){
-              return true;
-            }
-            return false;
-          })
-          if(newChildren.length > 0){
-            navTemp.children = newChildren;
-            NavItemsValidated.value.push(navTemp);
-          }
-        }else{
-          //verificar si los permisos del usuario autenti cado tiene el permiso del nav
-          if(permissions.includes(nav.permission)){
-            NavItemsValidated.value.push(nav);
-          }
-        }
+  if (!user) return [];
+
+  const roleName = typeof user.role === 'object' ? user.role?.name : user.role;
+  const permissions = Array.isArray(user.permissions) ? user.permissions : [];
+
+  const validated = [];
+  navItems.forEach((nav) => {
+    if (roleName === 'Super-Admin' || roleName === 'Admin' || roleName === 'admin') {
+      validated.push(nav);
+    } else {
+      if (nav.permission === 'all') {
+        validated.push(nav);
+        return;
       }
-    })
-  }
+      if (nav.heading) {
+        if (!nav.permissions || nav.permissions.some(p => permissions.includes(p))) {
+          validated.push(nav);
+        }
+        return;
+      }
+      if (nav.children) {
+        let newChildren = nav.children.filter((subnav) => {
+          return subnav.permission === 'all' || permissions.includes(subnav.permission);
+        });
+        if (newChildren.length > 0) {
+          validated.push({ ...nav, children: newChildren });
+        }
+        return;
+      }
+      if (permissions.includes(nav.permission)) {
+        validated.push(nav);
+      }
+    }
+  });
+  return validated;
 })
 
 </script>

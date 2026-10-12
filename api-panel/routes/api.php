@@ -16,6 +16,10 @@ Route::group([
     Route::post('/me', [AuthController::class, 'me'])->middleware('auth:api')->name('me');
 });
 
+use App\Http\Controllers\ClientController;
+use App\Http\Controllers\OrderController;
+use App\Http\Controllers\DashboardController;
+
 // --- Rutas de Roles y Usuarios (Base Limpia) ---
 Route::group([
     // 'middleware' => ['auth:api']
@@ -25,4 +29,14 @@ Route::group([
     Route::get('user/get-roles', [userController::class, 'getRoles']);
     Route::post('user/{id}', [userController::class, 'update']);
     Route::resource('user', userController::class);
+
+    // Dashboard Stats
+    Route::get('dashboard/stats', [DashboardController::class, 'stats']);
+
+    // Clientes
+    Route::resource('clients', ClientController::class);
+
+    // Pedidos
+    Route::patch('orders/{id}/status', [OrderController::class, 'updateStatus']);
+    Route::resource('orders', OrderController::class);
 });

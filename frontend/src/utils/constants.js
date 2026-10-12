@@ -8,6 +8,30 @@ export const PERMISOS = [
         ]
     },
     {
+        'name': 'Monitoreo Territorial',
+        'permisos': [
+            { name: 'Ver Mapa en Vivo', permiso: 'ver_mapa' }
+        ]
+    },
+    {
+        'name': 'Clientes',
+        'permisos': [
+            { name: 'Listado', permiso: 'listar_cliente' },
+            { name: 'Registrar', permiso: 'registrar_cliente' },
+            { name: 'Editar', permiso: 'editar_cliente' },
+            { name: 'Eliminar', permiso: 'eliminar_cliente' }
+        ]
+    },
+    {
+        'name': 'Pedidos y Entregas',
+        'permisos': [
+            { name: 'Listado', permiso: 'listar_pedido' },
+            { name: 'Registrar', permiso: 'registrar_pedido' },
+            { name: 'Editar', permiso: 'editar_pedido' },
+            { name: 'Eliminar', permiso: 'eliminar_pedido' }
+        ]
+    },
+    {
         'name': 'Roles',
         'permisos': [
             { name: 'Listado', permiso: 'listar_rol' },
