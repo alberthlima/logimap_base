@@ -67,14 +67,35 @@ let dialogMapInstance = null
 let dialogMarker = null
 let dialogGeojsonLayer = null
 
-// Opciones de distritos por ciudad
+// Opciones de distritos por ciudad (14 de El Alto y los 7 Macrodistritos Urbanos + 2 Rurales de La Paz)
 const districtsByCity = {
-  'El Alto': ['Distrito 1', 'Distrito 2', 'Distrito 3', 'Distrito 4', 'Distrito 5', 'Distrito 6', 'Distrito 8'],
-  'La Paz': ['CENTRO', 'COTAHUMA', 'MAX PAREDES', 'SUR'],
+  'El Alto': [
+    'Distrito 1', 'Distrito 2', 'Distrito 3', 'Distrito 4', 'Distrito 5',
+    'Distrito 6', 'Distrito 7', 'Distrito 8', 'Distrito 9', 'Distrito 10',
+    'Distrito 11', 'Distrito 12', 'Distrito 13', 'Distrito 14',
+  ],
+  'La Paz': [
+    'CENTRO', 'COTAHUMA', 'MAX PAREDES', 'PERIFERICA',
+    'SAN ANTONIO', 'SUR', 'MALLASA', 'HAMPATURI', 'ZONGO',
+  ],
 }
 
 const currentDistrictOptions = computed(() => {
   return districtsByCity[clientForm.value.city] || []
+})
+
+const filterDistrictOptions = computed(() => {
+  if (selectedCity.value === 'El Alto') {
+    return ['TODOS', ...districtsByCity['El Alto']]
+  }
+  if (selectedCity.value === 'La Paz') {
+    return ['TODOS', ...districtsByCity['La Paz']]
+  }
+  return ['TODOS', ...districtsByCity['El Alto'], ...districtsByCity['La Paz']]
+})
+
+watch(selectedCity, () => {
+  selectedDistrict.value = 'TODOS'
 })
 
 // Headers de tabla
@@ -132,7 +153,7 @@ const stats = computed(() => {
 const detectDistrict = (lat, lng) => {
   const city = clientForm.value.city
   const geojson = geojsonCache[city]
-  const key = city === 'El Alto' ? 'name' : 'macro_vige'
+  const key = city === 'El Alto' ? 'name' : 'macro_ante'
   if (geojson) {
     const found = findDistrictForCoordinates(lat, lng, geojson, key)
     if (found) {
@@ -214,7 +235,7 @@ const updateDialogGeojsonLayer = () => {
 
   const city = clientForm.value.city
   const geojson = geojsonCache[city]
-  const key = city === 'El Alto' ? 'name' : 'macro_vige'
+  const key = city === 'El Alto' ? 'name' : 'macro_ante'
 
   if (geojson && dialogMapInstance) {
     dialogGeojsonLayer = L.geoJSON(geojson, {
@@ -224,6 +245,12 @@ const updateDialogGeojsonLayer = () => {
         fillColor: '#3B82F6',
         fillOpacity: 0.12,
         dashArray: '3',
+      },
+      onEachFeature: (feature, layer) => {
+        const districtName = feature.properties?.[key] || feature.properties?.macro_ante || feature.properties?.name || ''
+        if (districtName) {
+          layer.bindTooltip(`<b>${districtName}</b>`, { sticky: true })
+        }
       },
     }).addTo(dialogMapInstance)
   }
@@ -235,6 +262,7 @@ const onCityChange = (newCity) => {
   const defaultCoords = newCity === 'El Alto' ? { lat: -16.5165, lng: -68.1550 } : { lat: -16.5050, lng: -68.1250 }
   clientForm.value.lat = defaultCoords.lat
   clientForm.value.lng = defaultCoords.lng
+  clientForm.value.district = newCity === 'El Alto' ? 'Distrito 1' : 'CENTRO'
 
   if (dialogMapInstance) {
     dialogMapInstance.flyTo([defaultCoords.lat, defaultCoords.lng], 13)
@@ -459,7 +487,7 @@ onMounted(() => {
           <VCol cols="12" sm="4" md="3">
             <VSelect
               v-model="selectedDistrict"
-              :items="['TODOS', ...districtsByCity['El Alto'], ...districtsByCity['La Paz']]"
+              :items="filterDistrictOptions"
               label="Distrito"
               density="compact"
               variant="outlined"

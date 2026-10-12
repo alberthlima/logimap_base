@@ -120,7 +120,7 @@ const fetchOrders = async () => {
 const detectDistrict = (lat, lng) => {
   const city = orderForm.value.city
   const geojson = geojsonCache[city]
-  const key = city === 'El Alto' ? 'name' : 'macro_vige'
+  const key = city === 'El Alto' ? 'name' : 'macro_ante'
   if (geojson) {
     const found = findDistrictForCoordinates(lat, lng, geojson, key)
     if (found) {
@@ -195,6 +195,7 @@ const updateOrderGeojsonLayer = () => {
 
   const city = orderForm.value.city
   const geojson = geojsonCache[city]
+  const key = city === 'El Alto' ? 'name' : 'macro_ante'
 
   if (geojson && orderMapInstance) {
     orderGeojsonLayer = L.geoJSON(geojson, {
@@ -204,6 +205,12 @@ const updateOrderGeojsonLayer = () => {
         fillColor: '#F59E0B',
         fillOpacity: 0.1,
         dashArray: '3',
+      },
+      onEachFeature: (feature, layer) => {
+        const districtName = feature.properties?.[key] || feature.properties?.macro_ante || feature.properties?.name || ''
+        if (districtName) {
+          layer.bindTooltip(`<b>${districtName}</b>`, { sticky: true })
+        }
       },
     }).addTo(orderMapInstance)
   }

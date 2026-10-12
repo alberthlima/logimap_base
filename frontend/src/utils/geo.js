@@ -31,14 +31,21 @@ export function findDistrictForCoordinates(lat, lng, geojson, districtKey = 'nam
   const pt = [lng, lat]
   for (const f of geojson.features) {
     const g = f.geometry
+    const getPropName = () => {
+      if (districtKey && f.properties[districtKey]) {
+        return f.properties[districtKey]
+      }
+      return f.properties.macro_ante || f.properties.name || f.properties.macro_vige || null
+    }
+
     if (g.type === 'Polygon') {
       if (isPointInRing(pt, g.coordinates[0])) {
-        return f.properties[districtKey] || f.properties.name
+        return getPropName()
       }
     } else if (g.type === 'MultiPolygon') {
       for (const poly of g.coordinates) {
         if (isPointInRing(pt, poly[0])) {
-          return f.properties[districtKey] || f.properties.name
+          return getPropName()
         }
       }
     }

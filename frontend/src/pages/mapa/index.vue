@@ -21,30 +21,48 @@ const cityConfigs = {
     zoom: 12,
     geojsonUrl: '/geojson/elalto_distritos.geojson',
     districtKey: 'name',
-    districts: ['Distrito 1', 'Distrito 2', 'Distrito 3', 'Distrito 4', 'Distrito 5', 'Distrito 6', 'Distrito 8'],
+    districts: [
+      'Distrito 1', 'Distrito 2', 'Distrito 3', 'Distrito 4', 'Distrito 5', 'Distrito 6', 'Distrito 7',
+      'Distrito 8', 'Distrito 9', 'Distrito 10', 'Distrito 11', 'Distrito 12', 'Distrito 13', 'Distrito 14'
+    ],
   },
   'La Paz': {
     center: [-16.5050, -68.1250],
     zoom: 12,
     geojsonUrl: '/geojson/lapaz_macrodistritos.geojson',
-    districtKey: 'macro_vige',
-    districts: ['CENTRO', 'COTAHUMA', 'MAX PAREDES', 'SUR'],
+    districtKey: 'macro_ante',
+    districts: [
+      'CENTRO', 'COTAHUMA', 'MAX PAREDES', 'PERIFERICA', 'SAN ANTONIO', 'SUR', 'MALLASA', 'HAMPATURI', 'ZONGO'
+    ],
   },
 }
 
 // Colores armoniosos por Distrito
 const districtColors = {
-  'Distrito 1': '#3B82F6', // Azul
-  'Distrito 2': '#10B981', // Esmeralda
-  'Distrito 3': '#F59E0B', // Ámbar
-  'Distrito 4': '#EC4899', // Rosa
-  'Distrito 5': '#8B5CF6', // Violeta
-  'Distrito 6': '#06B6D4', // Cian
-  'Distrito 8': '#F97316', // Naranja
+  'Distrito 1': '#3B82F6',
+  'Distrito 2': '#10B981',
+  'Distrito 3': '#F59E0B',
+  'Distrito 4': '#EC4899',
+  'Distrito 5': '#8B5CF6',
+  'Distrito 6': '#06B6D4',
+  'Distrito 7': '#6366F1',
+  'Distrito 8': '#F97316',
+  'Distrito 9': '#14B8A6',
+  'Distrito 10': '#E11D48',
+  'Distrito 11': '#84CC16',
+  'Distrito 12': '#A855F7',
+  'Distrito 13': '#0EA5E9',
+  'Distrito 14': '#D97706',
+  // 7 Macrodistritos Urbanos de La Paz + 2 Rurales
   'CENTRO': '#3B82F6',
   'COTAHUMA': '#10B981',
   'MAX PAREDES': '#EC4899',
+  'PERIFERICA': '#06B6D4',
+  'SAN ANTONIO': '#F59E0B',
   'SUR': '#8B5CF6',
+  'MALLASA': '#F97316',
+  'HAMPATURI': '#14B8A6',
+  'ZONGO': '#64748B',
 }
 
 const statusColors = {
@@ -337,7 +355,7 @@ const loadGeoJsonLayer = async () => {
 
     geojsonLayer = L.geoJSON(data, {
       style: (feature) => {
-        const districtName = feature.properties[config.districtKey] || feature.properties.name
+        const districtName = feature.properties[config.districtKey] || feature.properties.macro_ante || feature.properties.name || feature.properties.macro_vige
         const color = getDistrictColor(districtName)
         const isSelected = selectedDistrict.value === 'Todos' || selectedDistrict.value === districtName
 
@@ -351,8 +369,10 @@ const loadGeoJsonLayer = async () => {
         }
       },
       onEachFeature: (feature, layer) => {
-        const districtName = feature.properties[config.districtKey] || feature.properties.name
-        const area = feature.properties.area_km2 ? `${Number(feature.properties.area_km2).toFixed(1)} km²` : ''
+        const districtName = feature.properties[config.districtKey] || feature.properties.macro_ante || feature.properties.name || feature.properties.macro_vige
+        const area = feature.properties.area_km2
+          ? `${Number(feature.properties.area_km2).toFixed(1)} km²`
+          : (feature.properties.ha ? `${(Number(feature.properties.ha) / 100).toFixed(1)} km²` : '')
         const pob = feature.properties.poblacion ? `${feature.properties.poblacion.toLocaleString()} hab.` : ''
 
         layer.bindTooltip(`
