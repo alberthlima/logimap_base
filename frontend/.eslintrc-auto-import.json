@@ -358,6 +358,8 @@
     "optionalPdfValidator": true,
     "pdfValidator": true,
     "selectValidator": true,
-    "useCashSession": true
+    "useCashSession": true,
+    "findDistrictForCoordinates": true,
+    "reverseGeocode": true
   }
 }

@@ -1,7 +1,10 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 import { $api } from '@/utils/api'
+import { findDistrictForCoordinates } from '@/utils/geo'
 
 definePage({
   meta: {
@@ -19,9 +22,29 @@ const searchQuery = ref('')
 const selectedStatus = ref('TODOS')
 const selectedCity = ref('TODAS')
 
-// Diálogo de Registro / Edición
+// Cache GeoJSON
+const geojsonCache = {
+  'El Alto': null,
+  'La Paz': null,
+}
+
+const loadGeojsonCache = async () => {
+  try {
+    const [resElAlto, resLaPaz] = await Promise.all([
+      fetch('/geojson/elalto_distritos.geojson').then(r => r.json()),
+      fetch('/geojson/lapaz_macrodistritos.geojson').then(r => r.json()),
+    ])
+    geojsonCache['El Alto'] = resElAlto
+    geojsonCache['La Paz'] = resLaPaz
+  } catch (e) {
+    console.error('Error cargando GeoJSON en pedidos:', e)
+  }
+}
+
+// Diálogo de Registro
 const isDialogOpen = ref(false)
 const formLoading = ref(false)
+const detectedDistrict = ref(null)
 
 const orderForm = ref({
   client_id: null,
@@ -30,13 +53,19 @@ const orderForm = ref({
   delivery_address: '',
   city: 'El Alto',
   district: 'Distrito 1',
-  lat: -16.5100,
-  lng: -68.1650,
+  lat: -16.5165,
+  lng: -68.1550,
   delivery_driver: 'Rodrigo Ramos (Moto 1)',
   items_summary: '',
   notes: '',
   delivery_date: new Date().toISOString().substr(0, 10),
 })
+
+// Mini-mapa Leaflet para Pedidos
+const orderMapContainer = ref(null)
+let orderMapInstance = null
+let orderMarker = null
+let orderGeojsonLayer = null
 
 const statusColors = {
   REGISTRADO: 'warning',
@@ -87,15 +116,117 @@ const fetchOrders = async () => {
   }
 }
 
-// Actualizar campos al seleccionar cliente
+// Detectar distrito por coordenadas
+const detectDistrict = (lat, lng) => {
+  const city = orderForm.value.city
+  const geojson = geojsonCache[city]
+  const key = city === 'El Alto' ? 'name' : 'macro_vige'
+  if (geojson) {
+    const found = findDistrictForCoordinates(lat, lng, geojson, key)
+    if (found) {
+      detectedDistrict.value = found
+      orderForm.value.district = found
+      return found
+    }
+  }
+  return null
+}
+
+// Inicializar el Mini-Mapa de Pedidos
+const initOrderMap = () => {
+  if (orderMapInstance) {
+    orderMapInstance.remove()
+    orderMapInstance = null
+  }
+
+  const initialLat = orderForm.value.lat || -16.5165
+  const initialLng = orderForm.value.lng || -68.1550
+
+  orderMapInstance = L.map(orderMapContainer.value, {
+    center: [initialLat, initialLng],
+    zoom: 14,
+  })
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors',
+    maxZoom: 19,
+  }).addTo(orderMapInstance)
+
+  const pinIcon = L.divIcon({
+    className: 'draggable-delivery-pin',
+    html: `
+      <div style="background:#F59E0B;color:#fff;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,0.4);border:2px solid #fff;font-size:16px;">
+        🚚
+      </div>
+    `,
+    iconSize: [34, 34],
+    iconAnchor: [17, 34],
+  })
+
+  orderMarker = L.marker([initialLat, initialLng], {
+    draggable: true,
+    icon: pinIcon,
+  }).addTo(orderMapInstance)
+
+  orderMarker.on('dragend', (e) => {
+    const pos = e.target.getLatLng()
+    orderForm.value.lat = Number(pos.lat.toFixed(6))
+    orderForm.value.lng = Number(pos.lng.toFixed(6))
+    detectDistrict(pos.lat, pos.lng)
+  })
+
+  orderMapInstance.on('click', (e) => {
+    const { lat, lng } = e.latlng
+    orderForm.value.lat = Number(lat.toFixed(6))
+    orderForm.value.lng = Number(lng.toFixed(6))
+    orderMarker.setLatLng([lat, lng])
+    detectDistrict(lat, lng)
+  })
+
+  updateOrderGeojsonLayer()
+  detectDistrict(initialLat, initialLng)
+}
+
+const updateOrderGeojsonLayer = () => {
+  if (orderGeojsonLayer && orderMapInstance) {
+    orderMapInstance.removeLayer(orderGeojsonLayer)
+    orderGeojsonLayer = null
+  }
+
+  const city = orderForm.value.city
+  const geojson = geojsonCache[city]
+
+  if (geojson && orderMapInstance) {
+    orderGeojsonLayer = L.geoJSON(geojson, {
+      style: {
+        color: '#F59E0B',
+        weight: 1.5,
+        fillColor: '#F59E0B',
+        fillOpacity: 0.1,
+        dashArray: '3',
+      },
+    }).addTo(orderMapInstance)
+  }
+}
+
+// Al seleccionar cliente
 const onClientSelected = (clientId) => {
   const c = clients.value.find(item => item.id === clientId)
   if (c) {
     orderForm.value.delivery_address = c.address || ''
     orderForm.value.city = c.city || 'El Alto'
     orderForm.value.district = c.district || 'Distrito 1'
-    orderForm.value.lat = c.lat || -16.5100
-    orderForm.value.lng = c.lng || -68.1650
+    orderForm.value.lat = c.lat || -16.5165
+    orderForm.value.lng = c.lng || -68.1550
+
+    if (orderMapInstance && c.lat && c.lng) {
+      orderMapInstance.flyTo([c.lat, c.lng], 15)
+      if (orderMarker) {
+        orderMarker.setLatLng([c.lat, c.lng])
+      }
+      updateOrderGeojsonLayer()
+      detectDistrict(c.lat, c.lng)
+    }
   }
 }
 
@@ -146,21 +277,27 @@ const updateOrderStatus = async (order, newStatus) => {
 
 // Abrir diálogo de creación
 const openCreateDialog = () => {
+  const defaultClient = clients.value[0]
   orderForm.value = {
-    client_id: clients.value[0]?.id || null,
+    client_id: defaultClient?.id || null,
     total_amount: 250.00,
     payment_method: 'Efectivo',
-    delivery_address: clients.value[0]?.address || '',
-    city: clients.value[0]?.city || 'El Alto',
-    district: clients.value[0]?.district || 'Distrito 1',
-    lat: clients.value[0]?.lat || -16.5100,
-    lng: clients.value[0]?.lng || -68.1650,
+    delivery_address: defaultClient?.address || '',
+    city: defaultClient?.city || 'El Alto',
+    district: defaultClient?.district || 'Distrito 1',
+    lat: defaultClient?.lat || -16.5165,
+    lng: defaultClient?.lng || -68.1550,
     delivery_driver: 'Rodrigo Ramos (Moto 1)',
-    items_summary: 'Pack abarrotes surtidos',
+    items_summary: '10x Aceite Fino, 20x Fideo Corona',
     notes: '',
     delivery_date: new Date().toISOString().substr(0, 10),
   }
+  detectedDistrict.value = defaultClient?.district || 'Distrito 1'
   isDialogOpen.value = true
+
+  nextTick(() => {
+    setTimeout(initOrderMap, 200)
+  })
 }
 
 // Guardar Pedido
@@ -198,6 +335,7 @@ const viewOnMap = () => {
 
 onMounted(() => {
   fetchOrders()
+  loadGeojsonCache()
 })
 </script>
 
@@ -287,10 +425,10 @@ onMounted(() => {
 
             <VBtn
               color="primary"
-              prepend-icon="ri-add-line"
+              prepend-icon="ri-map-pin-add-line"
               @click="openCreateDialog"
             >
-              Nuevo Pedido
+              Georreferenciar Nuevo Pedido
             </VBtn>
           </div>
         </div>
@@ -449,92 +587,147 @@ onMounted(() => {
       </VDataTable>
     </VCard>
 
-    <!-- DIÁLOGO DE NUEVO PEDIDO -->
-    <VDialog v-model="isDialogOpen" max-width="650px">
+    <!-- DIÁLOGO DE NUEVO PEDIDO CON MINI-MAPA DE ENTREGA -->
+    <VDialog v-model="isDialogOpen" max-width="980px" persistent>
       <VCard>
-        <VCardTitle class="pa-4 border-b">
-          Registrar Nuevo Pedido y Asignar Entrega
+        <VCardTitle class="pa-4 border-b d-flex justify-space-between align-center">
+          <div class="d-flex align-center gap-2">
+            <VIcon icon="ri-truck-line" color="primary" />
+            <span class="font-weight-bold">
+              Georreferenciar Entrega y Asignar Pedido
+            </span>
+          </div>
+          <VBtn icon="ri-close-line" variant="text" size="small" @click="isDialogOpen = false" />
         </VCardTitle>
 
         <VCardText class="pa-4">
           <VRow>
-            <!-- Seleccionar Cliente -->
-            <VCol cols="12">
-              <VSelect
-                v-model="orderForm.client_id"
-                :items="clients"
-                item-title="business_name"
-                item-value="id"
-                label="Cliente / Negocio Destino"
-                variant="outlined"
-                density="comfortable"
-                @update:model-value="onClientSelected"
-              >
-                <template #item="{ props: itemProps, item: clientItem }">
-                  <VListItem v-bind="itemProps" :subtitle="`${clientItem.raw.district} (${clientItem.raw.city}) - ${clientItem.raw.address}`" />
-                </template>
-              </VSelect>
+            <!-- COLUMNA IZQUIERDA: MINI-MAPA DE ENTREGA -->
+            <VCol cols="12" md="6">
+              <div class="georeferencer-container">
+                <div class="d-flex justify-space-between align-center mb-2">
+                  <span class="text-caption font-weight-bold text-primary">
+                    📍 Ubicación exacta de descarga / entrega
+                  </span>
+                  <span class="text-caption text-disabled">
+                    Arrastra el camión al punto exacto
+                  </span>
+                </div>
+
+                <!-- Contenedor del Mapa Leaflet -->
+                <div class="dialog-map-box">
+                  <div ref="orderMapContainer" class="dialog-map-el" />
+                </div>
+
+                <!-- Tarjeta de Detección Automática de Distrito -->
+                <div class="detection-alert mt-2 pa-2 d-flex align-center justify-space-between">
+                  <div>
+                    <span class="text-caption text-disabled d-block">Distrito de Despacho:</span>
+                    <span class="text-body-2 font-weight-bold text-warning">
+                      🎯 {{ orderForm.district }} ({{ orderForm.city }})
+                    </span>
+                  </div>
+                  <div class="text-end">
+                    <span class="text-caption text-disabled d-block">GPS Entrega:</span>
+                    <span class="text-caption font-weight-mono">
+                      {{ orderForm.lat }}, {{ orderForm.lng }}
+                    </span>
+                  </div>
+                </div>
+              </div>
             </VCol>
 
-            <VCol cols="12" sm="6">
-              <VTextField
-                v-model.number="orderForm.total_amount"
-                label="Monto Total (Bs)"
-                type="number"
-                step="0.50"
-                variant="outlined"
-                density="comfortable"
-              />
-            </VCol>
+            <!-- COLUMNA DERECHA: FORMULARIO DEL PEDIDO -->
+            <VCol cols="12" md="6">
+              <VRow>
+                <!-- Seleccionar Cliente -->
+                <VCol cols="12">
+                  <VSelect
+                    v-model="orderForm.client_id"
+                    :items="clients"
+                    item-title="business_name"
+                    item-value="id"
+                    label="Cliente / Negocio Destino"
+                    variant="outlined"
+                    density="comfortable"
+                    color="primary"
+                    prepend-inner-icon="ri-store-2-line"
+                    @update:model-value="onClientSelected"
+                  >
+                    <template #item="{ props: itemProps, item: clientItem }">
+                      <VListItem
+                        v-bind="itemProps"
+                        :title="clientItem.raw.business_name || (clientItem.raw.name + ' ' + clientItem.raw.surname)"
+                        :subtitle="`${clientItem.raw.district} (${clientItem.raw.city}) - ${clientItem.raw.address || 'Sin dir.'}`"
+                      />
+                    </template>
+                  </VSelect>
+                </VCol>
 
-            <VCol cols="12" sm="6">
-              <VSelect
-                v-model="orderForm.payment_method"
-                :items="['Efectivo', 'QR Simple', 'Transferencia', 'Crédito 15 días']"
-                label="Forma de Pago"
-                variant="outlined"
-                density="comfortable"
-              />
-            </VCol>
+                <VCol cols="12" sm="6">
+                  <VTextField
+                    v-model.number="orderForm.total_amount"
+                    label="Monto Total (Bs)"
+                    type="number"
+                    step="0.50"
+                    variant="outlined"
+                    density="comfortable"
+                    prepend-inner-icon="ri-money-dollar-circle-line"
+                  />
+                </VCol>
 
-            <VCol cols="12" sm="6">
-              <VSelect
-                v-model="orderForm.delivery_driver"
-                :items="driversList"
-                label="Repartidor Asignado"
-                variant="outlined"
-                density="comfortable"
-              />
-            </VCol>
+                <VCol cols="12" sm="6">
+                  <VSelect
+                    v-model="orderForm.payment_method"
+                    :items="['Efectivo', 'QR Simple', 'Transferencia', 'Crédito 15 días']"
+                    label="Forma de Pago"
+                    variant="outlined"
+                    density="comfortable"
+                  />
+                </VCol>
 
-            <VCol cols="12" sm="6">
-              <VTextField
-                v-model="orderForm.delivery_date"
-                label="Fecha Estimada de Entrega"
-                type="date"
-                variant="outlined"
-                density="comfortable"
-              />
-            </VCol>
+                <VCol cols="12" sm="6">
+                  <VSelect
+                    v-model="orderForm.delivery_driver"
+                    :items="driversList"
+                    label="Repartidor Asignado"
+                    variant="outlined"
+                    density="comfortable"
+                    prepend-inner-icon="ri-steering-line"
+                  />
+                </VCol>
 
-            <VCol cols="12">
-              <VTextField
-                v-model="orderForm.delivery_address"
-                label="Dirección de Entrega"
-                variant="outlined"
-                density="comfortable"
-              />
-            </VCol>
+                <VCol cols="12" sm="6">
+                  <VTextField
+                    v-model="orderForm.delivery_date"
+                    label="Fecha de Entrega"
+                    type="date"
+                    variant="outlined"
+                    density="comfortable"
+                  />
+                </VCol>
 
-            <VCol cols="12">
-              <VTextarea
-                v-model="orderForm.items_summary"
-                label="Detalle de Productos / Abarrotes"
-                placeholder="Ej. 10x Aceite Fino, 20x Fideo Corona..."
-                rows="2"
-                variant="outlined"
-                density="comfortable"
-              />
+                <VCol cols="12">
+                  <VTextField
+                    v-model="orderForm.delivery_address"
+                    label="Dirección de Descarga"
+                    variant="outlined"
+                    density="comfortable"
+                    prepend-inner-icon="ri-map-pin-line"
+                  />
+                </VCol>
+
+                <VCol cols="12">
+                  <VTextarea
+                    v-model="orderForm.items_summary"
+                    label="Detalle de Productos / Abarrotes"
+                    placeholder="Ej. 10x Aceite Fino 900ml, 20x Fideo Corona..."
+                    rows="2"
+                    variant="outlined"
+                    density="comfortable"
+                  />
+                </VCol>
+              </VRow>
             </VCol>
           </VRow>
         </VCardText>
@@ -543,8 +736,8 @@ onMounted(() => {
           <VBtn variant="outlined" color="secondary" @click="isDialogOpen = false">
             Cancelar
           </VBtn>
-          <VBtn color="primary" :loading="formLoading" @click="saveOrder">
-            Generar Pedido
+          <VBtn color="primary" :loading="formLoading" prepend-icon="ri-send-plane-line" @click="saveOrder">
+            Generar Pedido Georreferenciado
           </VBtn>
         </VCardActions>
       </VCard>
@@ -552,7 +745,7 @@ onMounted(() => {
   </div>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 .orders-view-wrapper {
   display: flex;
   flex-direction: column;
@@ -560,5 +753,31 @@ onMounted(() => {
 
 .status-table-select {
   min-width: 140px;
+}
+
+.georeferencer-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.dialog-map-box {
+  width: 100%;
+  height: 320px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(var(--v-border-color), 0.2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.dialog-map-el {
+  width: 100%;
+  height: 100%;
+}
+
+.detection-alert {
+  background: rgba(var(--v-theme-warning), 0.08);
+  border: 1px solid rgba(var(--v-theme-warning), 0.2);
+  border-radius: 8px;
 }
 </style>

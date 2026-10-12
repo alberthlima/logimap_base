@@ -3,6 +3,7 @@ import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { $api } from '@/utils/api'
+import { findDistrictForCoordinates } from '@/utils/geo'
 
 definePage({
   meta: {
@@ -67,11 +68,77 @@ const searchQuery = ref('')
 const showDistrictsLayer = ref(true)
 const isDrawerOpen = ref(true)
 
-// Datos cargados
+// Datos cargados de pedidos y clientes
 const orders = ref([])
 const clients = ref([])
 const loading = ref(false)
 const selectedOrder = ref(null)
+
+// Diálogos rápidos de georreferenciación desde el mapa
+const isQuickClientOpen = ref(false)
+const isQuickOrderOpen = ref(false)
+const quickLoading = ref(false)
+
+const quickClientForm = ref({
+  name: '',
+  surname: '',
+  business_name: '',
+  phone: '',
+  city: 'El Alto',
+  district: 'Distrito 1',
+  zone: '',
+  address: '',
+  lat: -16.5165,
+  lng: -68.1550,
+  notes: '',
+})
+
+const quickOrderForm = ref({
+  client_id: null,
+  total_amount: 180.00,
+  payment_method: 'Efectivo',
+  delivery_address: '',
+  city: 'El Alto',
+  district: 'Distrito 1',
+  lat: -16.5165,
+  lng: -68.1550,
+  delivery_driver: 'Rodrigo Ramos (Moto 1)',
+  items_summary: 'Pedido generado directamente desde el mapa',
+  notes: '',
+  delivery_date: new Date().toISOString().substr(0, 10),
+})
+
+const saveQuickClient = async () => {
+  quickLoading.value = true
+  try {
+    await $api('clients', {
+      method: 'POST',
+      body: quickClientForm.value,
+    })
+    isQuickClientOpen.value = false
+    await fetchOperationsData()
+  } catch (e) {
+    console.error('Error al guardar cliente rápido:', e)
+  } finally {
+    quickLoading.value = false
+  }
+}
+
+const saveQuickOrder = async () => {
+  quickLoading.value = true
+  try {
+    await $api('orders', {
+      method: 'POST',
+      body: quickOrderForm.value,
+    })
+    isQuickOrderOpen.value = false
+    await fetchOperationsData()
+  } catch (e) {
+    console.error('Error al guardar pedido rápido:', e)
+  } finally {
+    quickLoading.value = false
+  }
+}
 
 // Mapa y Capas Leaflet
 const mapContainer = ref(null)
@@ -168,8 +235,89 @@ const initMap = () => {
 
   markersGroup = L.layerGroup().addTo(mapInstance)
 
+  // Georreferenciador al hacer clic en el mapa
+  mapInstance.on('click', (e) => {
+    handleMapClick(e.latlng)
+  })
+
   loadGeoJsonLayer()
   renderMarkers()
+}
+
+let currentGeojsonData = null
+let tempGeorefMarker = null
+
+const handleMapClick = (latlng) => {
+  const { lat, lng } = latlng
+  const config = cityConfigs[selectedCity.value]
+  const detected = currentGeojsonData ? findDistrictForCoordinates(lat, lng, currentGeojsonData, config.districtKey) : null
+  const districtName = detected || 'Zona Central / Sin delimitar'
+
+  if (tempGeorefMarker && mapInstance) {
+    mapInstance.removeLayer(tempGeorefMarker)
+  }
+
+  const pinIcon = L.divIcon({
+    className: 'temp-georef-pin',
+    html: `
+      <div style="background:#EF4444; color:#fff; width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; box-shadow:0 0 16px rgba(239,68,68,0.8); border:2px solid #fff; font-size:16px; animation: bounce 1s infinite alternate;">
+        📍
+      </div>
+    `,
+    iconSize: [34, 34],
+    iconAnchor: [17, 34],
+  })
+
+  tempGeorefMarker = L.marker([lat, lng], { icon: pinIcon }).addTo(mapInstance)
+
+  const popupHtml = `
+    <div style="min-width: 220px; padding: 6px; font-family: inherit;">
+      <div style="font-weight: 700; font-size: 13px; color: #1E293B; margin-bottom: 4px;">
+        🎯 Punto Georreferenciado
+      </div>
+      <div style="font-size: 12px; color: #2563EB; font-weight: 600; margin-bottom: 2px;">
+        Distrito: ${districtName} (${selectedCity.value})
+      </div>
+      <div style="font-size: 11px; color: #64748B; margin-bottom: 8px;">
+        GPS: ${lat.toFixed(6)}, ${lng.toFixed(6)}
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <button id="btn-quick-client" style="background:#2563EB; color:#fff; border:none; padding:6px 10px; border-radius:6px; font-size:11px; font-weight:600; cursor:pointer;">
+          + Registrar Cliente Aquí
+        </button>
+        <button id="btn-quick-order" style="background:#F59E0B; color:#fff; border:none; padding:6px 10px; border-radius:6px; font-size:11px; font-weight:600; cursor:pointer;">
+          + Crear Pedido de Entrega Aquí
+        </button>
+      </div>
+    </div>
+  `
+
+  tempGeorefMarker.bindPopup(popupHtml, { maxWidth: 280 }).openPopup()
+
+  setTimeout(() => {
+    const btnClient = document.getElementById('btn-quick-client')
+    const btnOrder = document.getElementById('btn-quick-order')
+    if (btnClient) {
+      btnClient.onclick = () => {
+        quickClientForm.value.lat = Number(lat.toFixed(6))
+        quickClientForm.value.lng = Number(lng.toFixed(6))
+        quickClientForm.value.city = selectedCity.value
+        quickClientForm.value.district = districtName
+        isQuickClientOpen.value = true
+        tempGeorefMarker.closePopup()
+      }
+    }
+    if (btnOrder) {
+      btnOrder.onclick = () => {
+        quickOrderForm.value.lat = Number(lat.toFixed(6))
+        quickOrderForm.value.lng = Number(lng.toFixed(6))
+        quickOrderForm.value.city = selectedCity.value
+        quickOrderForm.value.district = districtName
+        isQuickOrderOpen.value = true
+        tempGeorefMarker.closePopup()
+      }
+    }
+  }, 100)
 }
 
 // Cargar Capa GeoJSON de Distritos
@@ -185,6 +333,7 @@ const loadGeoJsonLayer = async () => {
   try {
     const res = await fetch(config.geojsonUrl)
     const data = await res.json()
+    currentGeojsonData = data
 
     geojsonLayer = L.geoJSON(data, {
       style: (feature) => {
@@ -228,8 +377,11 @@ const loadGeoJsonLayer = async () => {
           mouseout: (e) => {
             geojsonLayer.resetStyle(e.target)
           },
-          click: () => {
+          click: (e) => {
             selectedDistrict.value = districtName
+            // Si el usuario hace clic en el polígono, georreferenciar ese punto
+            L.DomEvent.stopPropagation(e)
+            handleMapClick(e.latlng)
           },
         })
       },
@@ -371,22 +523,26 @@ onMounted(() => {
       <VRow align="center" no-gutters class="gap-y-2">
         <!-- Selector de Ciudad -->
         <VCol cols="12" md="3" class="d-flex align-center gap-2">
-          <VBtnToggle
-            v-model="selectedCity"
-            mandatory
-            color="primary"
-            variant="outlined"
-            density="compact"
-            class="city-toggle"
-            @update:model-value="changeCity"
-          >
-            <VBtn value="El Alto" size="small" prepend-icon="ri-map-pin-2-line">
+          <div class="d-flex align-center gap-1">
+            <VBtn
+              size="small"
+              :variant="selectedCity === 'El Alto' ? 'elevated' : 'tonal'"
+              :color="selectedCity === 'El Alto' ? 'primary' : 'default'"
+              prepend-icon="ri-map-pin-2-line"
+              @click="changeCity('El Alto')"
+            >
               El Alto
             </VBtn>
-            <VBtn value="La Paz" size="small" prepend-icon="ri-building-line">
+            <VBtn
+              size="small"
+              :variant="selectedCity === 'La Paz' ? 'elevated' : 'tonal'"
+              :color="selectedCity === 'La Paz' ? 'primary' : 'default'"
+              prepend-icon="ri-building-line"
+              @click="changeCity('La Paz')"
+            >
               La Paz
             </VBtn>
-          </VBtnToggle>
+          </div>
 
           <VBtn
             :icon="isDrawerOpen ? 'ri-layout-right-line' : 'ri-layout-right-fill'"
@@ -602,6 +758,156 @@ onMounted(() => {
         </div>
       </VCard>
     </div>
+
+    <!-- DIÁLOGO RÁPIDO: NUEVO CLIENTE DESDE MAPA -->
+    <VDialog v-model="isQuickClientOpen" max-width="600px">
+      <VCard>
+        <VCardTitle class="pa-4 border-b d-flex justify-space-between align-center">
+          <div class="d-flex align-center gap-2">
+            <VIcon icon="ri-map-pin-add-line" color="primary" />
+            <span class="font-weight-bold">Registrar Cliente en Coordenada Georreferenciada</span>
+          </div>
+          <VBtn icon="ri-close-line" variant="text" size="small" @click="isQuickClientOpen = false" />
+        </VCardTitle>
+        <VCardText class="pa-4">
+          <div class="mb-3 pa-2 rounded bg-var-theme-surface border d-flex justify-space-between align-center">
+            <div>
+              <span class="text-caption text-disabled d-block">Distrito Autodetectado:</span>
+              <span class="text-body-2 font-weight-bold text-primary">🎯 {{ quickClientForm.district }} ({{ quickClientForm.city }})</span>
+            </div>
+            <div class="text-end">
+              <span class="text-caption text-disabled d-block">GPS Coords:</span>
+              <span class="text-caption font-weight-mono">{{ quickClientForm.lat }}, {{ quickClientForm.lng }}</span>
+            </div>
+          </div>
+          <VRow>
+            <VCol cols="12">
+              <VTextField
+                v-model="quickClientForm.business_name"
+                label="Nombre Comercial / Micromarket"
+                placeholder="Ej. Abarrotes San José"
+                variant="outlined"
+                density="comfortable"
+              />
+            </VCol>
+            <VCol cols="12" sm="6">
+              <VTextField
+                v-model="quickClientForm.name"
+                label="Nombre del Propietario"
+                placeholder="Juan"
+                variant="outlined"
+                density="comfortable"
+              />
+            </VCol>
+            <VCol cols="12" sm="6">
+              <VTextField
+                v-model="quickClientForm.phone"
+                label="WhatsApp / Teléfono"
+                placeholder="71234567"
+                variant="outlined"
+                density="comfortable"
+              />
+            </VCol>
+            <VCol cols="12">
+              <VTextField
+                v-model="quickClientForm.address"
+                label="Dirección / Calle"
+                placeholder="Av. 6 de Marzo frente al cruce..."
+                variant="outlined"
+                density="comfortable"
+              />
+            </VCol>
+          </VRow>
+        </VCardText>
+        <VCardActions class="pa-4 border-t d-flex justify-end gap-2">
+          <VBtn variant="outlined" color="secondary" @click="isQuickClientOpen = false">Cancelar</VBtn>
+          <VBtn color="primary" :loading="quickLoading" prepend-icon="ri-save-line" @click="saveQuickClient">
+            Guardar Cliente Georreferenciado
+          </VBtn>
+        </VCardActions>
+      </VCard>
+    </VDialog>
+
+    <!-- DIÁLOGO RÁPIDO: NUEVO PEDIDO DESDE MAPA -->
+    <VDialog v-model="isQuickOrderOpen" max-width="600px">
+      <VCard>
+        <VCardTitle class="pa-4 border-b d-flex justify-space-between align-center">
+          <div class="d-flex align-center gap-2">
+            <VIcon icon="ri-truck-line" color="warning" />
+            <span class="font-weight-bold">Crear Pedido de Entrega en Punto Seleccionado</span>
+          </div>
+          <VBtn icon="ri-close-line" variant="text" size="small" @click="isQuickOrderOpen = false" />
+        </VCardTitle>
+        <VCardText class="pa-4">
+          <div class="mb-3 pa-2 rounded bg-var-theme-surface border d-flex justify-space-between align-center">
+            <div>
+              <span class="text-caption text-disabled d-block">Distrito Destino:</span>
+              <span class="text-body-2 font-weight-bold text-warning">🎯 {{ quickOrderForm.district }} ({{ quickOrderForm.city }})</span>
+            </div>
+            <div class="text-end">
+              <span class="text-caption text-disabled d-block">GPS Entrega:</span>
+              <span class="text-caption font-weight-mono">{{ quickOrderForm.lat }}, {{ quickOrderForm.lng }}</span>
+            </div>
+          </div>
+          <VRow>
+            <VCol cols="12">
+              <VSelect
+                v-model="quickOrderForm.client_id"
+                :items="clients"
+                item-title="business_name"
+                item-value="id"
+                label="Cliente / Micromarket Destino"
+                variant="outlined"
+                density="comfortable"
+              />
+            </VCol>
+            <VCol cols="12" sm="6">
+              <VTextField
+                v-model.number="quickOrderForm.total_amount"
+                label="Monto del Pedido (Bs)"
+                type="number"
+                step="0.5"
+                variant="outlined"
+                density="comfortable"
+              />
+            </VCol>
+            <VCol cols="12" sm="6">
+              <VSelect
+                v-model="quickOrderForm.delivery_driver"
+                :items="['Rodrigo Ramos (Moto 1)', 'Marcelo Huanca (Camioneta 3)', 'David Choque (Furgón 2)', 'Alvaro Cruz (Moto 4)']"
+                label="Repartidor Asignado"
+                variant="outlined"
+                density="comfortable"
+              />
+            </VCol>
+            <VCol cols="12">
+              <VTextField
+                v-model="quickOrderForm.delivery_address"
+                label="Instrucción de Entrega / Dirección"
+                placeholder="Punto de entrega marcado en mapa"
+                variant="outlined"
+                density="comfortable"
+              />
+            </VCol>
+            <VCol cols="12">
+              <VTextarea
+                v-model="quickOrderForm.items_summary"
+                label="Detalle de Productos"
+                rows="2"
+                variant="outlined"
+                density="comfortable"
+              />
+            </VCol>
+          </VRow>
+        </VCardText>
+        <VCardActions class="pa-4 border-t d-flex justify-end gap-2">
+          <VBtn variant="outlined" color="secondary" @click="isQuickOrderOpen = false">Cancelar</VBtn>
+          <VBtn color="warning" :loading="quickLoading" prepend-icon="ri-send-plane-line" @click="saveQuickOrder">
+            Generar Pedido en esta Ubicación
+          </VBtn>
+        </VCardActions>
+      </VCard>
+    </VDialog>
   </div>
 </template>
 

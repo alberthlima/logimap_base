@@ -1,7 +1,10 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 import { $api } from '@/utils/api'
+import { findDistrictForCoordinates } from '@/utils/geo'
 
 definePage({
   meta: {
@@ -18,10 +21,30 @@ const searchQuery = ref('')
 const selectedCity = ref('TODAS')
 const selectedDistrict = ref('TODOS')
 
+// Cache GeoJSON para detección automática de distritos
+const geojsonCache = {
+  'El Alto': null,
+  'La Paz': null,
+}
+
+const loadGeojsonCache = async () => {
+  try {
+    const [resElAlto, resLaPaz] = await Promise.all([
+      fetch('/geojson/elalto_distritos.geojson').then(r => r.json()),
+      fetch('/geojson/lapaz_macrodistritos.geojson').then(r => r.json()),
+    ])
+    geojsonCache['El Alto'] = resElAlto
+    geojsonCache['La Paz'] = resLaPaz
+  } catch (e) {
+    console.error('Error cargando GeoJSON en clientes:', e)
+  }
+}
+
 // Diálogo de Registro / Edición
 const isDialogOpen = ref(false)
 const isEditing = ref(false)
 const formLoading = ref(false)
+const detectedDistrict = ref(null)
 
 const clientForm = ref({
   id: null,
@@ -33,10 +56,16 @@ const clientForm = ref({
   district: 'Distrito 1',
   zone: '',
   address: '',
-  lat: -16.5100,
-  lng: -68.1650,
+  lat: -16.5165,
+  lng: -68.1550,
   notes: '',
 })
+
+// Mini-mapa Leaflet para el Diálogo
+const dialogMapContainer = ref(null)
+let dialogMapInstance = null
+let dialogMarker = null
+let dialogGeojsonLayer = null
 
 // Opciones de distritos por ciudad
 const districtsByCity = {
@@ -99,6 +128,143 @@ const stats = computed(() => {
   return { total, elAlto, laPaz, activeOrders }
 })
 
+// Detectar distrito por coordenadas
+const detectDistrict = (lat, lng) => {
+  const city = clientForm.value.city
+  const geojson = geojsonCache[city]
+  const key = city === 'El Alto' ? 'name' : 'macro_vige'
+  if (geojson) {
+    const found = findDistrictForCoordinates(lat, lng, geojson, key)
+    if (found) {
+      detectedDistrict.value = found
+      clientForm.value.district = found
+      return found
+    }
+  }
+  return null
+}
+
+// Inicializar el Mini-Mapa del Diálogo
+const initDialogMap = () => {
+  if (dialogMapInstance) {
+    dialogMapInstance.remove()
+    dialogMapInstance = null
+  }
+
+  const initialLat = clientForm.value.lat || -16.5165
+  const initialLng = clientForm.value.lng || -68.1550
+
+  dialogMapInstance = L.map(dialogMapContainer.value, {
+    center: [initialLat, initialLng],
+    zoom: 13,
+  })
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors',
+    maxZoom: 19,
+  }).addTo(dialogMapInstance)
+
+  // Crear pin arrastrable
+  const pinIcon = L.divIcon({
+    className: 'draggable-client-pin',
+    html: `
+      <div style="background:#2563EB;color:#fff;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,0.4);border:2px solid #fff;font-size:16px;">
+        📍
+      </div>
+    `,
+    iconSize: [34, 34],
+    iconAnchor: [17, 34],
+  })
+
+  dialogMarker = L.marker([initialLat, initialLng], {
+    draggable: true,
+    icon: pinIcon,
+  }).addTo(dialogMapInstance)
+
+  // Evento al arrastrar el marcador
+  dialogMarker.on('dragend', (e) => {
+    const pos = e.target.getLatLng()
+    clientForm.value.lat = Number(pos.lat.toFixed(6))
+    clientForm.value.lng = Number(pos.lng.toFixed(6))
+    detectDistrict(pos.lat, pos.lng)
+  })
+
+  // Evento al hacer clic en el mapa
+  dialogMapInstance.on('click', (e) => {
+    const { lat, lng } = e.latlng
+    clientForm.value.lat = Number(lat.toFixed(6))
+    clientForm.value.lng = Number(lng.toFixed(6))
+    dialogMarker.setLatLng([lat, lng])
+    detectDistrict(lat, lng)
+  })
+
+  // Cargar capa GeoJSON de distritos en el mini-mapa
+  updateDialogGeojsonLayer()
+
+  // Detectar distrito del punto actual
+  detectDistrict(initialLat, initialLng)
+}
+
+// Actualizar Capa GeoJSON en el mini-mapa
+const updateDialogGeojsonLayer = () => {
+  if (dialogGeojsonLayer && dialogMapInstance) {
+    dialogMapInstance.removeLayer(dialogGeojsonLayer)
+    dialogGeojsonLayer = null
+  }
+
+  const city = clientForm.value.city
+  const geojson = geojsonCache[city]
+  const key = city === 'El Alto' ? 'name' : 'macro_vige'
+
+  if (geojson && dialogMapInstance) {
+    dialogGeojsonLayer = L.geoJSON(geojson, {
+      style: {
+        color: '#3B82F6',
+        weight: 1.5,
+        fillColor: '#3B82F6',
+        fillOpacity: 0.12,
+        dashArray: '3',
+      },
+    }).addTo(dialogMapInstance)
+  }
+}
+
+// Al cambiar ciudad en el formulario
+const onCityChange = (newCity) => {
+  clientForm.value.city = newCity
+  const defaultCoords = newCity === 'El Alto' ? { lat: -16.5165, lng: -68.1550 } : { lat: -16.5050, lng: -68.1250 }
+  clientForm.value.lat = defaultCoords.lat
+  clientForm.value.lng = defaultCoords.lng
+
+  if (dialogMapInstance) {
+    dialogMapInstance.flyTo([defaultCoords.lat, defaultCoords.lng], 13)
+    if (dialogMarker) {
+      dialogMarker.setLatLng([defaultCoords.lat, defaultCoords.lng])
+    }
+    updateDialogGeojsonLayer()
+    detectDistrict(defaultCoords.lat, defaultCoords.lng)
+  }
+}
+
+// Usar Geolocalización del Navegador
+const useCurrentLocation = () => {
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition((pos) => {
+      const lat = Number(pos.coords.latitude.toFixed(6))
+      const lng = Number(pos.coords.longitude.toFixed(6))
+      clientForm.value.lat = lat
+      clientForm.value.lng = lng
+      if (dialogMapInstance && dialogMarker) {
+        dialogMapInstance.flyTo([lat, lng], 15)
+        dialogMarker.setLatLng([lat, lng])
+        detectDistrict(lat, lng)
+      }
+    }, () => {
+      alert('No se pudo obtener la ubicación GPS actual.')
+    })
+  }
+}
+
 // Abrir diálogo de creación
 const openCreateDialog = () => {
   isEditing.value = false
@@ -112,18 +278,28 @@ const openCreateDialog = () => {
     district: 'Distrito 1',
     zone: '',
     address: '',
-    lat: -16.5100,
-    lng: -68.1650,
+    lat: -16.5165,
+    lng: -68.1550,
     notes: '',
   }
+  detectedDistrict.value = null
   isDialogOpen.value = true
+
+  nextTick(() => {
+    setTimeout(initDialogMap, 200)
+  })
 }
 
 // Abrir diálogo de edición
 const openEditDialog = (item) => {
   isEditing.value = true
   clientForm.value = { ...item }
+  detectedDistrict.value = item.district
   isDialogOpen.value = true
+
+  nextTick(() => {
+    setTimeout(initDialogMap, 200)
+  })
 }
 
 // Guardar Cliente
@@ -162,12 +338,13 @@ const deleteClient = async (id) => {
 }
 
 // Redirigir al Mapa con enfoque
-const viewOnMap = (client) => {
+const viewOnMap = () => {
   router.push({ name: 'mapa' })
 }
 
 onMounted(() => {
   fetchClients()
+  loadGeojsonCache()
 })
 </script>
 
@@ -247,10 +424,10 @@ onMounted(() => {
 
           <VBtn
             color="primary"
-            prepend-icon="ri-user-add-line"
+            prepend-icon="ri-map-pin-add-line"
             @click="openCreateDialog"
           >
-            Nuevo Cliente
+            Georreferenciar Nuevo Cliente
           </VBtn>
         </div>
 
@@ -403,123 +580,162 @@ onMounted(() => {
       </VDataTable>
     </VCard>
 
-    <!-- DIÁLOGO DE REGISTRO / EDICIÓN -->
-    <VDialog v-model="isDialogOpen" max-width="650px">
+    <!-- DIÁLOGO DE REGISTRO CON MINI-MAPA GEORREFERENCIADOR -->
+    <VDialog v-model="isDialogOpen" max-width="980px" persistent>
       <VCard>
-        <VCardTitle class="pa-4 border-b">
-          {{ isEditing ? 'Editar Cliente Georreferenciado' : 'Registrar Nuevo Cliente' }}
+        <VCardTitle class="pa-4 border-b d-flex justify-space-between align-center">
+          <div class="d-flex align-center gap-2">
+            <VIcon icon="ri-map-pin-user-line" color="primary" />
+            <span class="font-weight-bold">
+              {{ isEditing ? 'Editar Georreferenciación de Cliente' : 'Georreferenciar y Registrar Nuevo Cliente' }}
+            </span>
+          </div>
+          <VBtn icon="ri-close-line" variant="text" size="small" @click="isDialogOpen = false" />
         </VCardTitle>
 
         <VCardText class="pa-4">
           <VRow>
-            <VCol cols="12" sm="6">
-              <VTextField
-                v-model="clientForm.business_name"
-                label="Nombre Comercial / Micromarket"
-                placeholder="Ej. Micromarket El Progreso"
-                variant="outlined"
-                density="comfortable"
-              />
+            <!-- COLUMNA IZQUIERDA: MAPA INTERACTIVO -->
+            <VCol cols="12" md="6">
+              <div class="georeferencer-container">
+                <div class="d-flex justify-space-between align-center mb-2">
+                  <span class="text-caption font-weight-bold text-primary">
+                    📍 Haz clic o arrastra el pin al punto del cliente
+                  </span>
+                  <VBtn
+                    size="x-small"
+                    variant="tonal"
+                    color="primary"
+                    prepend-icon="ri-crosshair-2-line"
+                    @click="useCurrentLocation"
+                  >
+                    Mi Ubicación
+                  </VBtn>
+                </div>
+
+                <!-- Contenedor del Mapa Leaflet -->
+                <div class="dialog-map-box">
+                  <div ref="dialogMapContainer" class="dialog-map-el" />
+                </div>
+
+                <!-- Tarjeta de Detección Automática de Distrito -->
+                <div class="detection-alert mt-2 pa-2 d-flex align-center justify-space-between">
+                  <div>
+                    <span class="text-caption text-disabled d-block">Distrito Autodetectado:</span>
+                    <span class="text-body-2 font-weight-bold text-primary">
+                      {{ detectedDistrict ? `🎯 ${detectedDistrict}` : 'Haz clic dentro de un distrito' }}
+                    </span>
+                  </div>
+                  <div class="text-end">
+                    <span class="text-caption text-disabled d-block">GPS Coords:</span>
+                    <span class="text-caption font-weight-mono">
+                      {{ clientForm.lat }}, {{ clientForm.lng }}
+                    </span>
+                  </div>
+                </div>
+              </div>
             </VCol>
 
-            <VCol cols="12" sm="6">
-              <VTextField
-                v-model="clientForm.phone"
-                label="Teléfono / Celular (WhatsApp)"
-                placeholder="Ej. 71512345"
-                variant="outlined"
-                density="comfortable"
-              />
-            </VCol>
+            <!-- COLUMNA DERECHA: FORMULARIO -->
+            <VCol cols="12" md="6">
+              <VRow>
+                <VCol cols="12">
+                  <VTextField
+                    v-model="clientForm.business_name"
+                    label="Nombre Comercial / Micromarket"
+                    placeholder="Ej. Micromarket Los Andes"
+                    variant="outlined"
+                    density="comfortable"
+                    prepend-inner-icon="ri-store-2-line"
+                  />
+                </VCol>
 
-            <VCol cols="12" sm="6">
-              <VTextField
-                v-model="clientForm.name"
-                label="Nombre del Propietario"
-                variant="outlined"
-                density="comfortable"
-              />
-            </VCol>
+                <VCol cols="12" sm="6">
+                  <VTextField
+                    v-model="clientForm.name"
+                    label="Nombre del Propietario"
+                    placeholder="Doña Remedios"
+                    variant="outlined"
+                    density="comfortable"
+                  />
+                </VCol>
 
-            <VCol cols="12" sm="6">
-              <VTextField
-                v-model="clientForm.surname"
-                label="Apellidos"
-                variant="outlined"
-                density="comfortable"
-              />
-            </VCol>
+                <VCol cols="12" sm="6">
+                  <VTextField
+                    v-model="clientForm.surname"
+                    label="Apellidos"
+                    placeholder="Mamani"
+                    variant="outlined"
+                    density="comfortable"
+                  />
+                </VCol>
 
-            <VCol cols="12" sm="6">
-              <VSelect
-                v-model="clientForm.city"
-                :items="['El Alto', 'La Paz']"
-                label="Ciudad"
-                variant="outlined"
-                density="comfortable"
-              />
-            </VCol>
+                <VCol cols="12" sm="6">
+                  <VTextField
+                    v-model="clientForm.phone"
+                    label="WhatsApp / Celular"
+                    placeholder="71542389"
+                    variant="outlined"
+                    density="comfortable"
+                    prepend-inner-icon="ri-whatsapp-line"
+                  />
+                </VCol>
 
-            <VCol cols="12" sm="6">
-              <VSelect
-                v-model="clientForm.district"
-                :items="currentDistrictOptions"
-                label="Distrito"
-                variant="outlined"
-                density="comfortable"
-              />
-            </VCol>
+                <VCol cols="12" sm="6">
+                  <VSelect
+                    v-model="clientForm.city"
+                    :items="['El Alto', 'La Paz']"
+                    label="Ciudad"
+                    variant="outlined"
+                    density="comfortable"
+                    @update:model-value="onCityChange"
+                  />
+                </VCol>
 
-            <VCol cols="12" sm="6">
-              <VTextField
-                v-model="clientForm.zone"
-                label="Zona o Barrio"
-                placeholder="Ej. Santiago II, Sopocachi"
-                variant="outlined"
-                density="comfortable"
-              />
-            </VCol>
+                <VCol cols="12" sm="6">
+                  <VSelect
+                    v-model="clientForm.district"
+                    :items="currentDistrictOptions"
+                    label="Distrito Asignado"
+                    variant="outlined"
+                    density="comfortable"
+                    color="primary"
+                    prepend-inner-icon="ri-compass-3-line"
+                  />
+                </VCol>
 
-            <VCol cols="12" sm="6">
-              <VTextField
-                v-model="clientForm.address"
-                label="Dirección Completa"
-                placeholder="Av. 6 de Marzo #450"
-                variant="outlined"
-                density="comfortable"
-              />
-            </VCol>
+                <VCol cols="12" sm="6">
+                  <VTextField
+                    v-model="clientForm.zone"
+                    label="Zona o Barrio"
+                    placeholder="Ej. Ciudad Satélite, Sopocachi"
+                    variant="outlined"
+                    density="comfortable"
+                  />
+                </VCol>
 
-            <VCol cols="12" sm="6">
-              <VTextField
-                v-model.number="clientForm.lat"
-                label="Latitud GPS"
-                type="number"
-                step="0.0001"
-                variant="outlined"
-                density="comfortable"
-              />
-            </VCol>
+                <VCol cols="12">
+                  <VTextField
+                    v-model="clientForm.address"
+                    label="Dirección de la Tienda / Negocio"
+                    placeholder="Av. Alfredo Sanjinés #450, Plan 112"
+                    variant="outlined"
+                    density="comfortable"
+                    prepend-inner-icon="ri-map-pin-line"
+                  />
+                </VCol>
 
-            <VCol cols="12" sm="6">
-              <VTextField
-                v-model.number="clientForm.lng"
-                label="Longitud GPS"
-                type="number"
-                step="0.0001"
-                variant="outlined"
-                density="comfortable"
-              />
-            </VCol>
-
-            <VCol cols="12">
-              <VTextarea
-                v-model="clientForm.notes"
-                label="Instrucciones de Entrega / Notas"
-                rows="2"
-                variant="outlined"
-                density="comfortable"
-              />
+                <VCol cols="12">
+                  <VTextarea
+                    v-model="clientForm.notes"
+                    label="Instrucciones para el Repartidor / Horarios"
+                    placeholder="Atención de 07:00 a 22:00. Punto de entrega por puerta trasera..."
+                    rows="2"
+                    variant="outlined"
+                    density="comfortable"
+                  />
+                </VCol>
+              </VRow>
             </VCol>
           </VRow>
         </VCardText>
@@ -528,8 +744,8 @@ onMounted(() => {
           <VBtn variant="outlined" color="secondary" @click="isDialogOpen = false">
             Cancelar
           </VBtn>
-          <VBtn color="primary" :loading="formLoading" @click="saveClient">
-            {{ isEditing ? 'Guardar Cambios' : 'Registrar Cliente' }}
+          <VBtn color="primary" :loading="formLoading" prepend-icon="ri-save-line" @click="saveClient">
+            {{ isEditing ? 'Guardar Cambios' : 'Guardar Cliente Georreferenciado' }}
           </VBtn>
         </VCardActions>
       </VCard>
@@ -537,9 +753,35 @@ onMounted(() => {
   </div>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 .clients-view-wrapper {
   display: flex;
   flex-direction: column;
+}
+
+.georeferencer-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.dialog-map-box {
+  width: 100%;
+  height: 320px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(var(--v-border-color), 0.2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.dialog-map-el {
+  width: 100%;
+  height: 100%;
+}
+
+.detection-alert {
+  background: rgba(var(--v-theme-primary), 0.08);
+  border: 1px solid rgba(var(--v-theme-primary), 0.2);
+  border-radius: 8px;
 }
 </style>
