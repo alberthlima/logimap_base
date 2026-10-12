@@ -16,7 +16,7 @@ import {
 export const { themeConfig, layoutConfig } = defineThemeConfig({
   app: {
     title: "LogiMap",
-    logo: h('img', { src: logo, height: 40, width: 40, style: 'object-fit: contain;' }),
+    logo: h('img', { src: logo, height: 38, width: 38, style: 'object-fit: contain; border-radius: 8px;' }),
     contentWidth: ContentWidth.Boxed,
     contentLayoutNav: AppContentLayoutNav.Vertical,
     overlayNavFromBreakpoint: breakpointsVuetifyV3.lg - 1, // 1 for matching with vuetify breakpoint. Docs: https://next.vuetifyjs.com/en/features/display-and-platform/
