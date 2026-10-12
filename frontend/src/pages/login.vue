@@ -149,18 +149,7 @@ const authV2LoginIllustration = useGenerateImageVariant(authV2LoginIllustrationL
     no-gutters
     class="auth-wrapper"
   >
-    <VCol
-      md="8"
-      class="d-none d-md-flex align-center justify-center position-relative"
-    >
-      <div class="d-flex align-center justify-center pa-10">
-        <img
-          :src="authV2LoginIllustration"
-          class="auth-illustration w-100"
-          alt="auth-illustration"
-        >
-      </div>
-    </VCol>
+    <!-- Columna Izquierda: Formulario de Login -->
     <VCol
       cols="12"
       md="4"
@@ -224,9 +213,29 @@ const authV2LoginIllustration = useGenerateImageVariant(authV2LoginIllustrationL
         </VCardText>
       </VCard>
     </VCol>
+
+    <!-- Columna Derecha: Ilustración Isométrica 3D -->
+    <VCol
+      md="8"
+      class="d-none d-md-flex align-center justify-center position-relative"
+    >
+      <div class="d-flex align-center justify-center pa-10">
+        <img
+          :src="authV2LoginIllustration"
+          class="auth-illustration w-100"
+          alt="auth-illustration"
+        >
+      </div>
+    </VCol>
   </VRow>
 </template>
 
 <style lang="scss">
 @use "@core/scss/template/pages/page-auth.scss";
+
+@media (min-width: 960px) {
+  .auth-card-v2 {
+    border-inline-end: 1px solid rgba(var(--v-border-color), 0.12);
+  }
+}
 </style>
