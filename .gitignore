@@ -1,0 +1,38 @@
+# Node & Frontend
+**/node_modules/
+**/.pnpm-store/
+**/dist/
+**/dist-ssr/
+**/node-compile-cache/
+frontend/public/mockServiceWorker.js
+
+# Laravel & Backend
+**/vendor/
+**/.env
+**/.env.*
+!.env.example
+**/storage/logs/
+**/storage/framework/cache/
+**/storage/framework/sessions/
+**/storage/framework/views/
+api-panel/public/storage
+api-panel/storage/*.key
+
+# Database dumps and extraction scripts
+*.sql
+*.docx
+guia.txt
+info.txt
+extract.php
+read.py
+drop_tables.php
+scratch/
+
+# OS & Editor
+.vscode/
+.idea/
+*.suo
+Thumbs.db
+.DS_Store
+*.zip
+*.log
