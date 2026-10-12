@@ -160,11 +160,6 @@ const authV2LoginIllustration = useGenerateImageVariant(authV2LoginIllustrationL
           alt="auth-illustration"
         >
       </div>
-      <VImg
-        :src="authV2LoginMask"
-        class="d-none d-md-flex auth-footer-mask"
-        alt="auth-mask"
-      />
     </VCol>
     <VCol
       cols="12"
@@ -178,7 +173,7 @@ const authV2LoginIllustration = useGenerateImageVariant(authV2LoginIllustrationL
         class="mt-12 mt-sm-0 pa-5 pa-lg-7"
       >
         <VCardText class="d-flex align-center justify-center pb-2">
-          <img src="@images/logo.png" alt="logo" width="170" style="border-radius: 14px; object-fit: contain; box-shadow: 0 4px 20px rgba(0,0,0,0.07);" />
+          <img src="@images/logo.png" alt="logo" width="160" style="object-fit: contain;" />
         </VCardText>
         <VCardText>
           <h4 class="text-h4 mb-1">
